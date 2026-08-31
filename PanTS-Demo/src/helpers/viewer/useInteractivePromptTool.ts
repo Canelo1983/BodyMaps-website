@@ -54,6 +54,7 @@ export function useInteractivePromptTool({
 	const [liveBoxCanvas, setLiveBoxCanvas] = useState<[[number, number], [number, number]] | null>(null);
 	const paneRef = useRef<CinePane | null>(null);
 	const busyRef = useRef(false);
+	const interactionKeyRef = useRef<string | null>(null);
 	// Drives the applying/success overlay (mirrors CopyAcrossSlicesFlyout's
 	// GuidedStepModal pattern) instead of the tool silently completing with
 	// only a session-log line — a click/box submit is a real server round
@@ -84,19 +85,21 @@ export function useInteractivePromptTool({
 		setStatus("applying");
 		setStatusMessage(null);
 		try {
+			const interactionKey = `${caseId}:${res}:${activeSegmentIndex}`;
+			const resetInteractions = interactionKeyRef.current !== interactionKey;
 			const changed = await submitInteractiveSegmentPrompt(
 				apiBase,
 				caseId,
 				activeSegmentIndex,
-				{ pointLps: pointWorld, boxLps: boxWorld, tolerance },
+				{ pointLps: pointWorld, boxLps: boxWorld, tolerance, resetInteractions },
 				res,
 			);
 			if (changed) {
+				interactionKeyRef.current = interactionKey;
 				const msg = `Interactive segment (${changed.toLocaleString()} vox)`;
 				onLog?.(msg);
 				setStatus("success");
 				setStatusMessage("Operation completed successfully");
-				onComplete?.();
 			} else {
 				const msg = "Interactive segment: nothing grew from that point — try a different spot.";
 				onLog?.(msg);

@@ -132,6 +132,7 @@ def segment_from_prompt(ct: np.ndarray, affine: np.ndarray, prompt: dict, case_k
                 case_key or "unkeyed",
                 point_ijk=seed if box_ijk is None else None,
                 box_ijk=box_ijk,
+                reset_interactions=bool(prompt.get("reset_interactions", False)),
             )
             if mask.sum() > 0:
                 return mask

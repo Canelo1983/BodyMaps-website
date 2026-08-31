@@ -85,10 +85,14 @@ def predict(
     case_key: str,
     point_ijk=None,
     box_ijk=None,
+    reset_interactions: bool = False,
 ) -> np.ndarray:
     session = _get_session()
     _ensure_volume_loaded(ct, case_key)
-    session.reset_interactions()
+    if reset_interactions:
+        session.reset_interactions()
+        if _target_buffer is not None:
+            _target_buffer.fill(0)
 
     if point_ijk is not None:
         session.add_point_interaction(list(point_ijk), include_interaction=True)

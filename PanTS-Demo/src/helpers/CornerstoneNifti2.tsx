@@ -2090,6 +2090,7 @@ export interface InteractivePrompt {
   pointLps: Point3;
   boxLps?: [Point3, Point3];
   tolerance?: number;
+  resetInteractions?: boolean;
 }
 
 async function _decompressGzip(buf: ArrayBuffer): Promise<ArrayBuffer> {
@@ -2136,6 +2137,7 @@ export async function submitInteractiveSegmentPrompt(
     ];
   }
   if (prompt.tolerance != null) body.tolerance = prompt.tolerance;
+  body.reset_interactions = prompt.resetInteractions ?? false;
 
   const httpRes = await fetch(`${apiBase}/api/interactive-segment/${caseId}`, {
     method: "POST",
