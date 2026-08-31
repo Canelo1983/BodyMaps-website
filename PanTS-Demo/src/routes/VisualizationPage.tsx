@@ -3324,6 +3324,10 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 	// segmentation volume exists would edit a mask on the wrong grid.
 	const handleAnnotateClick = () => {
 		if (collaborationDisabled) return;
+		if (isLocal) {
+			handleToggleAnnotationToolbar();
+			return;
+		}
 		const hdReadyNow = isHd || enhance.state === "done";
 		if (hdReadyNow) {
 			handleToggleAnnotationToolbar();
@@ -4140,7 +4144,7 @@ const aiAvailableOrgans = useMemo(() => {
 												</button>
 											</div>
 											
-											{!isLocal && !soloChallenge && liveRoom?.metadata.mode !== "quiz" && (() => {
+											{!soloChallenge && liveRoom?.metadata.mode !== "quiz" && (() => {
 												// Annotating on the low-res stream would edit a mask that
 												// doesn't line up with the eventual full-res volume — but
 												// the button itself is never disabled for that reason
