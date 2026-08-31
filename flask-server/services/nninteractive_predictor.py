@@ -28,9 +28,11 @@ module-level cache is correctly shared across every request thread.
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
 
-SERVER_URL = "http://127.0.0.1:1527"
+SERVER_URL = os.getenv("NNINTERACTIVE_SERVER_URL", "http://127.0.0.1:1527").strip()
 
 _session = None
 _cached_case_key: str | None = None
@@ -45,8 +47,8 @@ def _get_session():
         _session = nnInteractiveRemoteInferenceSession(server_url=SERVER_URL)
         if not _session.ping():
             raise RuntimeError(
-                f"nninteractive-server not reachable at {SERVER_URL} — "
-                "check it's running (tmux session 'nninteractive' on bdmap1)."
+                f"nninteractive-server not reachable at {SERVER_URL}. "
+                "Set NNINTERACTIVE_SERVER_URL to a reachable nnInteractive server and verify that it is running."
             )
     return _session
 
