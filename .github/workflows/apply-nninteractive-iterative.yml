@@ -1,0 +1,109 @@
+name: Apply iterative nnInteractive refinement
+
+on:
+  push:
+    branches:
+      - feature/nninteractive-annotation-improvements
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-check:
+    if: ${{ !contains(github.event.head_commit.message, '[nninteractive-iterative]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/nninteractive-annotation-improvements
+          fetch-depth: 0
+
+      - name: Apply iterative prompt patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # Backend predictor: keep prompt history unless explicitly reset and
+          # pass positive/negative semantics through include_interaction.
+          p = Path('flask-server/services/nninteractive_predictor.py')
+          s = p.read_text()
+          s = s.replace('    box_ijk=None,\n) -> np.ndarray:\n', '    box_ijk=None,\n    include_interaction: bool = True,\n    reset_interactions: bool = False,\n) -> np.ndarray:\n')
+          s = s.replace('    session.reset_interactions()\n\n    if point_ijk is not None:\n        session.add_point_interaction(list(point_ijk), include_interaction=True)\n', '    if reset_interactions:\n        session.reset_interactions()\n        if _target_buffer is not None:\n            _target_buffer.fill(0)\n\n    if point_ijk is not None:\n        session.add_point_interaction(list(point_ijk), include_interaction=include_interaction)\n')
+          s = s.replace('        session.add_bbox_interaction(axis_pairs, include_interaction=True)\n', '        session.add_bbox_interaction(axis_pairs, include_interaction=include_interaction)\n')
+          p.write_text(s)
+
+          # Model seam: propagate iterative controls from the request prompt.
+          p = Path('flask-server/services/advanced_analysis.py')
+          s = p.read_text()
+          old = '''                point_ijk=seed if box_ijk is None else None,\n                box_ijk=box_ijk,\n            )'''
+          new = '''                point_ijk=seed if box_ijk is None else None,\n                box_ijk=box_ijk,\n                include_interaction=bool(prompt.get("include_interaction", True)),\n                reset_interactions=bool(prompt.get("reset_interactions", False)),\n            )'''
+          if old not in s:
+              raise SystemExit('advanced_analysis predictor call anchor not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          # API endpoint: accept the two optional iterative controls. Locate the
+          # prompt dict around point_lps/point_ijk without depending on line nums.
+          p = Path('flask-server/api/api_blueprint.py')
+          s = p.read_text()
+          marker = '"tolerance": body.get("tolerance", 80.0),'
+          if marker in s and '"include_interaction": body.get("include_interaction", True),' not in s:
+              s = s.replace(marker, marker + '\n                "include_interaction": body.get("include_interaction", True),\n                "reset_interactions": body.get("reset_interactions", False),', 1)
+          elif '"include_interaction": body.get("include_interaction", True),' not in s:
+              raise SystemExit('interactive endpoint tolerance anchor not found')
+          p.write_text(s)
+
+          # Frontend request contract: send positive/negative + reset flags.
+          p = Path('PanTS-Demo/src/helpers/CornerstoneNifti2.tsx')
+          s = p.read_text()
+          anchor = 'tolerance?: number;'
+          if anchor in s and 'includeInteraction?: boolean;' not in s:
+              s = s.replace(anchor, anchor + '\n\tincludeInteraction?: boolean;\n\tresetInteractions?: boolean;', 1)
+          body_anchor = 'tolerance: prompt.tolerance,'
+          if body_anchor in s and 'include_interaction: prompt.includeInteraction ?? true,' not in s:
+              s = s.replace(body_anchor, body_anchor + '\n\t\tinclude_interaction: prompt.includeInteraction ?? true,\n\t\treset_interactions: prompt.resetInteractions ?? false,', 1)
+          if 'include_interaction: prompt.includeInteraction ?? true,' not in s:
+              raise SystemExit('Cornerstone request body anchor not found')
+          p.write_text(s)
+
+          # Gesture: normal click = positive; Alt/Option-click = negative.
+          # Keep the tool armed after success so prompts can accumulate.
+          p = Path('PanTS-Demo/src/helpers/viewer/useInteractivePromptTool.ts')
+          s = p.read_text()
+          s = s.replace('const submit = useCallback(async (_pane: CinePane, pointWorld: Point3, boxWorld?: [Point3, Point3]) => {', 'const submit = useCallback(async (_pane: CinePane, pointWorld: Point3, boxWorld?: [Point3, Point3], includeInteraction = true) => {')
+          s = s.replace('{ pointLps: pointWorld, boxLps: boxWorld, tolerance },', '{ pointLps: pointWorld, boxLps: boxWorld, tolerance, includeInteraction },')
+          s = s.replace('\t\t\t\tonComplete?.();\n', '')
+          s = s.replace('\t\tvoid submit(pane, world);\n', '\t\t// Normal click adds a positive prompt; Alt/Option-click adds a negative correction.\n\t\tvoid submit(pane, world, undefined, !e.altKey);\n', 1)
+          p.write_text(s)
+
+          # Toolbar copy makes the refinement gesture discoverable.
+          p = Path('PanTS-Demo/src/components/viewer/AnnotationToolbar.tsx')
+          s = p.read_text()
+          s = s.replace('label: "AI Point", Icon: IconPoint, description: "Segment from a single interactive point prompt."', 'label: "AI Point +/−", Icon: IconPoint, description: "Click to add a positive AI prompt; Alt/Option-click to add a negative correction. Prompts refine the current mask iteratively."')
+          p.write_text(s)
+          PY
+
+      - name: Install frontend dependencies
+        working-directory: PanTS-Demo
+        run: npm ci
+
+      - name: Type-check frontend
+        working-directory: PanTS-Demo
+        run: npm run typecheck
+
+      - name: Compile-check Python changes
+        run: python3 -m py_compile flask-server/services/nninteractive_predictor.py flask-server/services/advanced_analysis.py flask-server/api/api_blueprint.py
+
+      - name: Commit validated patch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes needed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add flask-server/services/nninteractive_predictor.py flask-server/services/advanced_analysis.py flask-server/api/api_blueprint.py PanTS-Demo/src/helpers/CornerstoneNifti2.tsx PanTS-Demo/src/helpers/viewer/useInteractivePromptTool.ts PanTS-Demo/src/components/viewer/AnnotationToolbar.tsx
+          git commit -m "[nninteractive-iterative] Add positive and negative iterative refinement"
+          git push origin HEAD:feature/nninteractive-annotation-improvements
