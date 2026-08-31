@@ -1,0 +1,72 @@
+name: Apply nnInteractive annotation improvements
+
+on:
+  push:
+    branches:
+      - feature/nninteractive-annotation-improvements
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-check:
+    if: ${{ !contains(github.event.head_commit.message, '[nninteractive-auto]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/nninteractive-annotation-improvements
+          fetch-depth: 0
+
+      - name: Expose nnInteractive point and box tools
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("PanTS-Demo/src/components/viewer/AnnotationToolbar.tsx")
+          text = path.read_text()
+
+          if "\tIconPoint,\n" not in text:
+              anchor = "\tIconCheck,\n"
+              if anchor not in text:
+                  raise SystemExit("Could not locate IconCheck import anchor")
+              text = text.replace(
+                  anchor,
+                  anchor + "\tIconPoint,\n\tIconBox,\n",
+                  1,
+              )
+
+          point_entry = '\t{ id: "pointSegment", label: "AI Point", Icon: IconPoint, description: "Segment from a single interactive point prompt." },\n'
+          box_entry = '\t{ id: "boxSegment", label: "AI Box", Icon: IconBox, description: "Segment from an interactive box prompt." },\n'
+
+          if point_entry not in text:
+              anchor = '\t{ id: "levelTracing", label: "Level Tracing", Icon: IconRipple, description: "Traces the boundary of similar intensity around cursor." },\n'
+              if anchor not in text:
+                  raise SystemExit("Could not locate Level Tracing TOOL_DEFS anchor")
+              text = text.replace(anchor, anchor + point_entry + box_entry, 1)
+
+          path.write_text(text)
+          PY
+
+      - name: Install frontend dependencies
+        working-directory: PanTS-Demo
+        run: npm ci
+
+      - name: Type-check frontend
+        working-directory: PanTS-Demo
+        run: npm run typecheck
+
+      - name: Commit validated patch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes needed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add PanTS-Demo/src/components/viewer/AnnotationToolbar.tsx
+          git commit -m "[nninteractive-auto] Expose AI point and box annotation tools"
+          git push origin HEAD:feature/nninteractive-annotation-improvements
